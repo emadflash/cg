@@ -16,6 +16,11 @@
     ERROR(__VA_ARGS__);\
     ERROR_EXIT
 
+#define MKDIR_OR_EXIT(X)\
+    if (mkdir(X, S_IRWXU) < 0) {\
+        ERROR_AND_EXIT("ERROR: Creating %s\n", X);\
+    }\
+
 /*ROOT DIR*/
 const char* root_gitignore = "\
 build/\n\
@@ -57,6 +62,7 @@ const char* source_cmakelists = "\
 cmake_minimum_required(VERSION 3.10)\n\
 \n\
 set(THIS \"Project_Binary\")\n\
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})\n\
 add_executable(${THIS}\n\
     main.cpp\n\
 )\n\
@@ -69,8 +75,8 @@ typedef struct {
 
 DirSource mk_dir_source(const char* main, const char* cmakelists) {
     return (DirSource) {
-        .main = source_main,
-        .cmakelists = source_cmakelists,
+        .main = main,
+        .cmakelists = cmakelists,
     };
 }
 /*SOURCE DIR END*/
@@ -106,11 +112,43 @@ typedef struct {
 
 DirTest mk_dir_test(const char* test, const char* cmakelists) {
     return (DirTest) {
-        .test = test_test,
-        .cmakelists = test_cmakelists,
+        .test = test,
+        .cmakelists = cmakelists,
     };
 }
 /*TEST DIR END*/
+
+/*BENCHMARK DIR*/
+const char* benchmark_cmakelists = "cmake_minimum_required (VERSION 3.10)\n\
+\n\
+add_subdirectory(benchmark)\n\
+\n\
+add_executable(bench\n\
+    bench.cpp\n\
+)\n\
+\n\
+target_link_libraries(bench\n\
+    benchmark\n\
+)\n\
+";
+
+const char* benchmark_bench = "#include <benchmark/benchmark.h>\n\
+\n\
+BENCHMARK_MAIN();\n\
+";
+
+typedef struct {
+    const char* bench;
+    const char* cmakelists;
+} DirBenchmark;
+
+DirBenchmark mk_dir_benchmark(const char* bench, const char* cmakelists) {
+    return (DirBenchmark) {
+        .bench = bench,
+        .cmakelists = cmakelists,
+    };
+}
+/*BENCHMARK DIR END*/
 
 /*CONFIG*/
 typedef struct {
@@ -132,7 +170,10 @@ void wreck_config(Config* config) {
 /*CONFIG END*/
 
 /*GIT*/
-#define REPOSITORY_GOOGLETEST "https://github.com/google/googletest"
+/*REPOSITORYS*/
+#define REPOSITORY_GOOGLE_TEST "https://github.com/google/googletest"
+#define REPOSITORY_GOOGLE_BENCHMARK "https://github.com/google/benchmark.git"
+
 #define GIT_INIT "git init"
 #define GIT_SUBMODULE_ADD "git submodule add"
 #define CG_GIT_INIT() CG_SYSTEM(GIT_INIT)
@@ -156,10 +197,10 @@ static void CG_MKDIR_OR_EXIT(const char* X) {
 
 void CG_ADD_SUBMODULE(const char* dir, const char* repo) {
     size_t buffer_size = strlen(GIT_SUBMODULE_ADD) + strlen(repo) + 3;
-    char* buffer[buffer_size];
+    char buffer[buffer_size];
     snprintf(buffer, buffer_size, "%s %s\0", GIT_SUBMODULE_ADD, repo);
 
-    /*TOOD Write a wrapper to jump inside a dir and exit*/
+    /*TODO Write a wrapper to jump inside a dir and exit*/
     chdir(dir);
     CG_SYSTEM(buffer);
     chdir("..");
@@ -252,8 +293,9 @@ Usage: ./%s\n\
         new    Creates new project dir\n\
         init   Iniitializes new project in current dir\n\
     Options:\n\
-        -add   Generate test, benchmark dirs);\n\
-        -help   Prints this crappy message);\n\
+        -add   Generate test, benchmark dirs\n\
+               Example: -add +test +bench\n\
+        -help   Prints this crappy message\n\
 ";
 
 static void Usage(FILE* where) {
@@ -299,20 +341,41 @@ int main(int argc, char** argv) {
         } else if (STRCMP(*args_begin, "-add")) {
             char** curr = args_begin + 1;
             if (curr == args_end) {
-                ERROR("ERROR: missing [test, benchmark]\n");
+                ERROR("ERROR: missing +test +benchmark\n");
                 Usage(stderr);
                 exit(1);
             } else {
                 /*currently reading only one at a time*/
-                if (STRCMP(*curr, "test")) {
-                    flags.test = true;
-                } else if (STRCMP(*curr, "test")) {
-                    flags.benchmark = true;
-                } else {
-                    ERROR("ERROR: Invaild %s", *curr);
+                /*-add +test +benchmark unicode*/
+                size_t max_args_len = 2;
+                char** list_args_begin = curr;
+                char** list_args_end = (curr + 1 != args_end) ? (list_args_begin + max_args_len) : (args_end); /*Might be pointing to memory out of bounds*/
+                /*Check first arg*/
+                if (*list_args_begin[0] != '+') {
+                    ERROR("ERROR: Invaild %s\n", *list_args_begin);
+                    Usage(stderr);
                     exit(1);
                 }
-                args_begin = curr + 1;
+
+                while(list_args_begin != list_args_end) {
+                    /*Order is important since if *list_args_begin[0] would be dereferencing memory out of bounds*/
+                    if (*list_args_begin[0] != '+') {
+                        goto CONTINUE_PARSE;
+                    }
+
+                    if (STRCMP(*list_args_begin, "+test")) {
+                        flags.test = true;
+                    } else if (STRCMP(*list_args_begin, "+bench")) {
+                        flags.benchmark = true;
+                    } else {
+                        ERROR("ERROR: Invaild %s\n", *list_args_begin);
+                        Usage(stderr);
+                        exit(1);
+                    }
+                    list_args_begin++;
+                }
+CONTINUE_PARSE:
+                args_begin = list_args_begin;
             }
         } else if (STRCMP(*args_begin, "-help")) {
             Usage(stdout);
@@ -349,17 +412,11 @@ int main(int argc, char** argv) {
 
     WRITE(directory_root, "CMakeLists.txt", Dir_Root.cmakelists);
     WRITE(directory_root, ".gitignore", Dir_Root.gitignore);
-    if (flags.test) {
-        WRITE_APPEND(directory_root, "CMakeLists.txt", "add_subdirectory(test)");
-    }
 
     /* Source directory */
     DirSource Dir_Source = mk_dir_source(source_main, source_cmakelists);
     char* directory_source = append_to_path(config.path, "src");
-    if (mkdir(directory_source, S_IRWXU) < 0) {
-        fprintf(stderr, "ERROR: Creating source directory: %s\n", directory_source);
-        exit(1);
-    }
+    MKDIR_OR_EXIT(directory_source);
 
     WRITE(directory_source, "main.cpp", Dir_Source.main);
     WRITE(directory_source, "CMakeLists.txt", Dir_Source.cmakelists);
@@ -369,18 +426,46 @@ int main(int argc, char** argv) {
     if (flags.test) {
         DirTest Dir_Test = mk_dir_test(test_test, test_cmakelists);
         const char* directory_test = append_to_path(config.path, "test");
-        if (mkdir(directory_test, S_IRWXU) < 0) {
-            fprintf(stderr, "ERROR: Creating test directory: %s\n", directory_test);
-            exit(1);
-        }
+        MKDIR_OR_EXIT(directory_test);
 
+        WRITE_APPEND(directory_root, "CMakeLists.txt", "add_subdirectory(test)\n");
         WRITE(directory_test, "test.cpp", Dir_Test.test);
         WRITE(directory_test, "CMakeLists.txt", Dir_Test.cmakelists);
 
         /*Add googletest*/
-        CG_ADD_SUBMODULE(directory_test, "https://github.com/google/googletest");
+        CG_ADD_SUBMODULE(directory_test, REPOSITORY_GOOGLE_TEST);
 
         free(directory_test);
+    }
+
+    /*Benchmark directory*/
+    if (flags.benchmark) {
+        if (!flags.test) {
+            /*Add Googletest as a dependency*/
+            const char* directory_vendor = append_to_path(config.path, "vendor");
+            MKDIR_OR_EXIT(directory_vendor);
+
+            WRITE_APPEND(directory_root, "CMakeLists.txt", "add_subdirectory(vendor/googletest)\n");
+
+            /*Add googletest*/
+            CG_ADD_SUBMODULE(directory_vendor, REPOSITORY_GOOGLE_TEST);
+
+            free(directory_vendor);
+            /*END*/
+        }
+
+        DirBenchmark Dir_Benchmark = mk_dir_benchmark(benchmark_bench, benchmark_cmakelists);
+        const char* directory_benchmark = append_to_path(config.path, "benchmark");
+        MKDIR_OR_EXIT(directory_benchmark);
+
+        WRITE_APPEND(directory_root, "CMakeLists.txt", "add_subdirectory(benchmark)\n");
+        WRITE(directory_benchmark, "bench.cpp", Dir_Benchmark.bench);
+        WRITE(directory_benchmark, "CMakeLists.txt", Dir_Benchmark.cmakelists);
+
+        /*Add googlebenchmark*/
+        CG_ADD_SUBMODULE(directory_benchmark, REPOSITORY_GOOGLE_BENCHMARK);
+
+        free(directory_benchmark);
     }
 
     wreck_config(&config);
