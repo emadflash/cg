@@ -2,8 +2,9 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
+#include <assert.h>
+#include <sys/time.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 
 #define EXECUTABLE "cg"
 
@@ -14,6 +15,11 @@
 #define ERROR(...) fprintf(stderr, __VA_ARGS__)
 #define ERROR_AND_EXIT(...)\
     ERROR(__VA_ARGS__);\
+    ERROR_EXIT
+
+#define CG_PANIC_A_EXIT(C)\
+    Usage(stderr);\
+    wreck_config((C));\
     ERROR_EXIT
 
 #define MKDIR_OR_EXIT(X)\
@@ -186,7 +192,6 @@ void CG_SYSTEM(const char* x) {
 
 static void CG_MKDIR_OR_EXIT(const char* X) {
     if (mkdir(X, S_IRWXU) < 0) {
-        ERROR("ERROR: Already exists: %s\n", X);
         perror("ERROR: mkdir()");
         exit(1);
     }
@@ -215,6 +220,7 @@ typedef struct {
 typedef struct {
     bool test;
     bool benchmark;
+    bool make_random_dir;
 } Flags;
 
 /*Maybe unused for sure*/
@@ -256,7 +262,7 @@ LOOP:
     return folder;
 }
 
-char* DEEP_COPY(char* dest, size_t size) {
+char* CG_DEEP_COPY(char* dest, size_t size) {
     size_t _size = size + 1;
     char* ret = (char*) malloc(_size* sizeof(char));
     memcpy(ret, dest, _size);
@@ -272,13 +278,24 @@ char* append_to_path(const char* path, char* file) {
     return _path;
 }
 
+bool is_vaild_string_of_ints(char* str, size_t len) {
+    int i = 0;
+    for(; i < len; ++i) {
+        if (str[i] >= 48 && str[i] <= 57) {
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
 #define WRITE(X, Y, Z) CG_WRITE("w", X, Y, Z)
 #define WRITE_APPEND(X, Y, Z) CG_WRITE("a", X, Y, Z)
 void CG_WRITE(const char* mode, const char* directory_path, const char* file_path, char* thing) {
     char* _file = append_to_path(directory_path, file_path);
     FILE* fp = fopen(_file, mode);
     if (fp == NULL) {
-        fprintf(stderr, "ERROR: Writing to %s\n", _file);
+        ERROR("ERROR: Writing to %s\n", _file);
         exit(1);
     }
     fprintf(fp, "%s", thing);
@@ -286,16 +303,52 @@ void CG_WRITE(const char* mode, const char* directory_path, const char* file_pat
     fclose(fp);
 }
 
+/*make random dir*/
+static const char* alphas = "abcdefghigklmopqrstuvxyz";
+
+int get_random_idx(const size_t range) {
+    return rand() % range;
+}
+
+char get_random_char(const char* chars, size_t len) {
+    size_t n = get_random_idx(len);
+    assert((n >= 0 && n < len) && "Random number generated is overflowing the chars buffer");
+    return chars[n];
+}
+
+char* get_random_dir_name(const size_t len) {
+    int i = 0;
+    char* dir_name = (char*) malloc((len + 1)* sizeof(char));
+    for(; i < len; ++i) {
+        dir_name[i] = get_random_char(alphas, strlen(alphas));
+    }
+    dir_name[len] = '\0';
+    return dir_name;
+}
+/*end*/
+
+void cmd_initialize_new(Config* config, char* curr) {
+    config->name = CG_DEEP_COPY(curr, strlen(curr));
+
+    char* _curr_path = get_curr_path();
+    size_t t_size = strlen(config->name) + strlen(_curr_path) + 2;
+    config->path = (char*) malloc(t_size* sizeof(char));
+    snprintf(config->path, t_size, "%s/%s\0", _curr_path, config->name);
+}
+
 static const char* help_message = "\
-Usage: ./%s\n\
-        Creates a temporary project\n\
-    Args:\n\
-        new    Creates new project dir\n\
-        init   Iniitializes new project in current dir\n\
-    Options:\n\
-        -add   Generate test, benchmark dirs\n\
-               Example: -add +test +bench\n\
-        -help   Prints this crappy message\n\
+Usage: %s\n\
+    Creates a temporary project\n\
+Args:\n\
+    new    Creates new project dir\n\
+    init   Iniitializes new project in current dir\n\
+\n\
+Options:\n\
+    -add   Generate test, benchmark dirs\n\
+           example: -add +test +bench\n\
+    -rnd   create a random dir, default directory length is 3\n\
+           can be changed using +[length]\n\
+    -help  Prints this crappy message\n\
 ";
 
 static void Usage(FILE* where) {
@@ -303,6 +356,8 @@ static void Usage(FILE* where) {
 }
 
 int main(int argc, char** argv) {
+    srand(time(NULL));
+
     if (argc < 2) {
         Usage(stderr);
         exit(1);
@@ -321,17 +376,15 @@ int main(int argc, char** argv) {
         if (STRCMP(*args_begin, "new")) {
             char** curr = args_begin + 1;
             if (curr == args_end) {
-                ERROR("ERROR: missing _NAME\n");
+                ERROR("ERROR: missing NAME\n");
                 Usage(stderr);
                 exit(1);
             } else {
-                config.name = DEEP_COPY(*curr, strlen(*curr));
-
-                char* _curr_path = get_curr_path();
-                size_t t_size = strlen(config.name) + strlen(_curr_path) + 2;
-                config.path = (char*) malloc(t_size* sizeof(char));
-                snprintf(config.path, t_size, "%s/%s\0", _curr_path, config.name);
-
+                if (flags.make_random_dir) {
+                    ERROR("ERROR: Invaild use of -rnd with new\n");
+                    CG_PANIC_A_EXIT(&config);
+                }
+                cmd_initialize_new(&config, *curr);
                 args.new = true;
                 args_begin = curr + 1;
             }
@@ -345,11 +398,10 @@ int main(int argc, char** argv) {
                 Usage(stderr);
                 exit(1);
             } else {
-                /*currently reading only one at a time*/
                 /*-add +test +benchmark unicode*/
                 size_t max_args_len = 2;
                 char** list_args_begin = curr;
-                char** list_args_end = (curr + 1 != args_end) ? (list_args_begin + max_args_len) : (args_end); /*Might be pointing to memory out of bounds*/
+                char** list_args_end = (curr + 1 != args_end) ? (list_args_begin + max_args_len) : (args_end);
                 /*Check first arg*/
                 if (*list_args_begin[0] != '+') {
                     ERROR("ERROR: Invaild %s\n", *list_args_begin);
@@ -358,7 +410,6 @@ int main(int argc, char** argv) {
                 }
 
                 while(list_args_begin != list_args_end) {
-                    /*Order is important since if *list_args_begin[0] would be dereferencing memory out of bounds*/
                     if (*list_args_begin[0] != '+') {
                         goto CONTINUE_PARSE;
                     }
@@ -377,6 +428,38 @@ int main(int argc, char** argv) {
 CONTINUE_PARSE:
                 args_begin = list_args_begin;
             }
+        } else if (STRCMP(*args_begin, "-rnd")) {
+            /*Raise an error if new is supplied as well*/
+            if (args.new) {
+                ERROR("ERROR: Invaild use of new with -rnd\n");
+                CG_PANIC_A_EXIT(&config);
+            }
+            int dir_name_length = 3;
+
+            char** list_args_begin = (args_begin + 1); 
+            if (list_args_begin != args_end && *list_args_begin[0] == '+') {
+                char* curr = *list_args_begin;
+                size_t dir_name_size = strlen(curr) - 1;
+                char* _dir_name_length = (char*) malloc(dir_name_size + 1 * sizeof(char));
+                memcpy(_dir_name_length, curr + 1, dir_name_size);
+                _dir_name_length[dir_name_size] = '\0';
+
+                if (!is_vaild_string_of_ints(_dir_name_length, strlen(_dir_name_length))) {
+                    ERROR("Invaild: %s, requires a int literal\n", curr);
+                    CG_PANIC_A_EXIT(&config);
+                }
+                dir_name_length = atoi(_dir_name_length);
+                free(_dir_name_length);
+                args_begin++;
+            }
+
+            flags.make_random_dir = true;
+            args.new = true;
+
+            char* dir_name = get_random_dir_name(dir_name_length);
+            cmd_initialize_new(&config, dir_name); /* try using it with -rnd new suicide */
+            free(dir_name);
+            args_begin++;
         } else if (STRCMP(*args_begin, "-help")) {
             Usage(stdout);
             exit(0);
@@ -394,7 +477,7 @@ CONTINUE_PARSE:
 
     if (args.init) {
         char* _path = get_curr_path();
-        config.path = DEEP_COPY(_path, strlen(_path));
+        config.path = CG_DEEP_COPY(_path, strlen(_path));
         config.name = get_curr_folder(config.path, strlen(config.path));
     }
 
