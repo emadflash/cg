@@ -17,13 +17,14 @@
     ERROR(__VA_ARGS__);\
     ERROR_EXIT
 
-#define CG_PANIC_A_EXIT(C)\
+#define CG_PANIC(C)\
     Usage(stderr);\
     wreck_config((C));\
     ERROR_EXIT
 
-#define MKDIR_OR_EXIT(X)\
+#define MKDIR_OR_PANIC(C, X)\
     if (mkdir(X, S_IRWXU) < 0) {\
+        CG_PANIC(C);\
         ERROR_AND_EXIT("ERROR: Creating %s\n", X);\
     }\
 
@@ -156,30 +157,12 @@ DirBenchmark mk_dir_benchmark(const char* bench, const char* cmakelists) {
 }
 /*BENCHMARK DIR END*/
 
-/*CONFIG*/
-typedef struct {
-    char* name;
-    char* path;
-    char* directory;
-} Config;
-
-void make_config(Config* config) {
-    config->name = NULL;
-    config->path = NULL;
-    config->directory = NULL;
-}
-
-void wreck_config(Config* config) {
-    free(config->name);
-    free(config->path);
-}
-/*CONFIG END*/
-
 /*GIT*/
 /*REPOSITORYS*/
 #define REPOSITORY_GOOGLE_TEST "https://github.com/google/googletest"
 #define REPOSITORY_GOOGLE_BENCHMARK "https://github.com/google/benchmark.git"
 
+/*#define GIT_STATUS "git status"*/
 #define GIT_INIT "git init"
 #define GIT_SUBMODULE_ADD "git submodule add"
 #define CG_GIT_INIT() CG_SYSTEM(GIT_INIT)
@@ -189,6 +172,13 @@ void wreck_config(Config* config) {
         ERROR_AND_EXIT("ERROR: executing %s", x);\
     }
 
+/*#define IS_CURR_PATH_GIT_REPOSITORY (system(GIT_STATUS) < 0)*/
+
+#define CG_SWITCH_DIRECTORY_A_EXEC(DIR, E)\
+    chdir(DIR);\
+    CG_SYSTEM((E));\
+    chdir("..")
+
 #define CG_MKDIR(X)\
     if (mkdir(X, S_IRWXU) < 0) {\
         ERROR("ERROR: mkdir(): %s: ", X);\
@@ -197,22 +187,18 @@ void wreck_config(Config* config) {
     }
 
 #define CG_MKDIR_W_GIT(X, Y)\
-    CG_MKDIR(Y);\
-    if (X) {\
-        chdir(X);\
-        CG_SYSTEM(GIT_INIT);\
-        chdir("..");\
+    CG_MKDIR(X);\
+    if (Y) {\
+        CG_SWITCH_DIRECTORY_A_EXEC(X, GIT_INIT);\
     }
 
+/*Maybe run this as a thread*/
 void CG_ADD_SUBMODULE(const char* dir, const char* repo) {
     size_t buffer_size = strlen(GIT_SUBMODULE_ADD) + strlen(repo) + 3;
     char buffer[buffer_size];
     snprintf(buffer, buffer_size, "%s %s\0", GIT_SUBMODULE_ADD, repo);
 
-    /*TODO Write a wrapper to jump inside a dir and exit*/
-    chdir(dir);
-    CG_SYSTEM(buffer);
-    chdir("..");
+    CG_SWITCH_DIRECTORY_A_EXEC(dir, buffer);
 }
 /*GIT END*/
 
@@ -227,10 +213,11 @@ typedef struct {
 #define IS_ADD_SUPPLIED (flags.test || flags.benchmark)
 
 typedef struct {
-    bool test;
-    bool benchmark;
-    bool make_random_dir;
-    bool initialize_git_repo;
+    bool test,
+         benchmark,
+         make_random_dir,
+         initialize_git_repo,
+         sprinkle_w_numerics;
 } Flags;
 
 void mk_flags(Flags* flags) {
@@ -286,6 +273,12 @@ char* CG_DEEP_COPY(char* dest, size_t size) {
 }
 
 /* TODO Make it variadic */
+void append_to_path_a_modify(char* path, size_t len, char* file) {
+    size_t _path_size = strlen(file) + 2;
+    path = (char*) realloc(path, _path_size* sizeof(char));
+    snprintf(path + len, "/%s\0", file);
+}
+
 char* append_to_path(const char* path, char* file) {
     size_t _path_size = strlen(path) + strlen(file) + 2;
     char* _path = (char*) malloc(_path_size* sizeof(char));
@@ -318,8 +311,9 @@ void CG_WRITE(const char* mode, const char* directory_path, const char* file_pat
     fclose(fp);
 }
 
-/*make random dir*/
+/*make random directory*/
 static const char* alphas = "abcdefghigklmopqrstuvxyz";
+static const char* numerics = "0123456789";
 
 int get_random_idx(const size_t range) {
     return rand() % range;
@@ -340,20 +334,65 @@ char* get_random_dir_name(const size_t len) {
     dir_name[len] = '\0';
     return dir_name;
 }
+
+void sprinkle_path_w_numerics(char* path, size_t len) {
+    int offset = 1;
+    int limit = len / 3;
+
+    /*TODO(madflash) replace this with macro*/
+    int i = 0;
+    for(; i < limit; ++i) {
+        int idx = rand() % len;
+        (idx == 0) ? idx += offset : idx;
+        assert((idx != 0 && idx <= len - 1) && "Index overflows the buffer");
+        path[idx] = get_random_char(numerics, strlen(numerics));
+    }
+}
 /*end*/
 
-void cmd_initialize_new(Config* config, char* curr) {
-    config->name = CG_DEEP_COPY(curr, strlen(curr));
+/*CONFIG*/
+typedef struct {
+    char* name;
+    char* path;
+    char* directory;
+} Config;
 
-    char* _curr_path = get_curr_path();
-    size_t t_size = strlen(config->name) + strlen(_curr_path) + 2;
-    config->path = (char*) malloc(t_size* sizeof(char));
-    snprintf(config->path, t_size, "%s/%s\0", _curr_path, config->name);
+void make_config(Config* config) {
+    config->name = NULL;
+    config->path = NULL;
+    config->directory = NULL;
 }
+
+void wreck_config(Config* config) {
+    free(config->name);
+    free(config->path);
+}
+
+void mk_config_name_new(Config* config, char* curr) {
+    config->name = CG_DEEP_COPY(curr, strlen(curr));
+}
+
+void mk_config_name_init(Config* config) {
+    config->name = get_curr_folder(config->path, strlen(config->path));
+}
+
+/*Initialize path from config->name*/
+void mk_path(Config* config, Args args) {
+    char* current_path = get_curr_path();
+
+    if (args.init) {
+        config->path = current_path;
+    }
+
+    if (args.new) {
+        config->path = append_to_path(current_path, config->name);
+    }
+}
+/*CONFIG END*/
 
 static const char* help_message = "\
 Usage: %s\n\
-    Creates a temporary project\n\
+    Creates a temporary (shitty) project\n\
 Args:\n\
     new    Creates new project dir\n\
     init   Iniitializes new project in current dir\n\
@@ -361,10 +400,11 @@ Args:\n\
 Options:\n\
     -add   Generate test, benchmark dirs\n\
            example: -add +test +bench\n\
-    -rnd   create a random dir, default directory length is 3\n\
+    -rd    Create a random directory, default length is 3\n\
            can be changed using +[length]\n\
-    -dg    Donot initialize git repo. Will raise error in case of external modules required\n\
-    -help  Prints this crappy message\n\
+    -dg    Do not initialize git repo. Will raise error in case of external modules required\n\
+    -nm    Add numerics to directory name at random positions something like salting\n\
+    -help  Prints this shitty message\n\
 ";
 
 static void Usage(FILE* where) {
@@ -399,14 +439,15 @@ int main(int argc, char** argv) {
                 exit(1);
             } else {
                 if (flags.make_random_dir) {
-                    ERROR("ERROR: Invaild use of -rnd with new\n");
-                    CG_PANIC_A_EXIT(&config);
+                    ERROR("ERROR: Shit use of -rd with new\n");
+                    CG_PANIC(&config);
                 }
-                cmd_initialize_new(&config, *curr);
+                mk_config_name_new(&config, *curr);
                 args.new = true;
                 args_begin = curr + 1;
             }
         } else if (STRCMP(*args_begin, "init")) {
+            mk_config_name_init(&config);
             args.init = true;
             args_begin += 1;
         } else if (STRCMP(*args_begin, "-add")) {
@@ -437,7 +478,7 @@ int main(int argc, char** argv) {
                     } else if (STRCMP(*list_args_begin, "+bench")) {
                         flags.benchmark = true;
                     } else {
-                        ERROR("ERROR: Invaild %s\n", *list_args_begin);
+                        ERROR("ERROR: Shit %s\n", *list_args_begin);
                         Usage(stderr);
                         exit(1);
                     }
@@ -446,11 +487,11 @@ int main(int argc, char** argv) {
 CONTINUE_PARSE:
                 args_begin = list_args_begin;
             }
-        } else if (STRCMP(*args_begin, "-rnd")) {
+        } else if (STRCMP(*args_begin, "-rd")) {
             /*Raise an error if new is supplied as well*/
             if (args.new) {
-                ERROR("ERROR: Invaild use of new with -rnd\n");
-                CG_PANIC_A_EXIT(&config);
+                ERROR("ERROR: Shit use of new with -rd\n");
+                CG_PANIC(&config);
             }
             int dir_name_length = 3;
 
@@ -463,8 +504,8 @@ CONTINUE_PARSE:
                 _dir_name_length[dir_name_size] = '\0';
 
                 if (!is_vaild_string_of_ints(_dir_name_length, strlen(_dir_name_length))) {
-                    ERROR("Invaild: %s, requires a int literal\n", curr);
-                    CG_PANIC_A_EXIT(&config);
+                    ERROR("ERROR: Shit %s, requires a int literal\n", curr);
+                    CG_PANIC(&config);
                 }
                 dir_name_length = atoi(_dir_name_length);
                 free(_dir_name_length);
@@ -475,11 +516,14 @@ CONTINUE_PARSE:
             args.new = true;
 
             char* dir_name = get_random_dir_name(dir_name_length);
-            cmd_initialize_new(&config, dir_name); /* try using it with -rnd new suicide */
+            mk_config_name_new(&config, dir_name); /* try using it with -rd new suicide */
             free(dir_name);
             args_begin++;
         } else if (STRCMP(*args_begin, "-dg")) {
             flags.initialize_git_repo = false;
+            args_begin++;
+        } else if (STRCMP(*args_begin, "-nm")) {
+            flags.sprinkle_w_numerics = true;
             args_begin++;
         } else if (STRCMP(*args_begin, "-help")) {
             Usage(stdout);
@@ -496,21 +540,22 @@ CONTINUE_PARSE:
         exit(1);
     }
 
-    if (args.init) {
-        char* _path = get_curr_path();
-        config.path = CG_DEEP_COPY(_path, strlen(_path));
-        config.name = get_curr_folder(config.path, strlen(config.path));
+    /*TODO(maflash) try ../cg/cg -nm new suicide*/
+    if (flags.sprinkle_w_numerics) {
+        sprinkle_path_w_numerics(config.name, strlen(config.name));
     }
+
+    mk_path(&config, args);
 
     config.directory = config.name;
 
     if (!flags.initialize_git_repo && IS_ADD_SUPPLIED) {
-        ERROR("Invaild: use of -dg with test and bench flags\n");
-        exit(1);
+        ERROR("ERROR: Shit use of -dg with test and bench flags\n");
+        CG_PANIC(&config);
     }
 
     if (!args.init) {
-        CG_MKDIR_W_GIT(flags.initialize_git_repo, config.directory);
+        CG_MKDIR_W_GIT(config.directory, flags.initialize_git_repo);
     } else {
         if (flags.initialize_git_repo) {
             CG_SYSTEM(GIT_INIT);
@@ -525,12 +570,16 @@ CONTINUE_PARSE:
     char* directory_root = config.path;
 
     WRITE(directory_root, "CMakeLists.txt", Dir_Root.cmakelists);
-    WRITE(directory_root, ".gitignore", Dir_Root.gitignore);
+    
+    /*TODO(madflash) This should apply to all files that requires git*/
+    if (flags.initialize_git_repo) {
+        WRITE(directory_root, ".gitignore", Dir_Root.gitignore);
+    }
 
     /* Source directory */
     DirSource Dir_Source = mk_dir_source(source_main, source_cmakelists);
     char* directory_source = append_to_path(config.path, "src");
-    MKDIR_OR_EXIT(directory_source);
+    MKDIR_OR_PANIC(&config, directory_source);
 
     WRITE(directory_source, "main.cpp", Dir_Source.main);
     WRITE(directory_source, "CMakeLists.txt", Dir_Source.cmakelists);
@@ -540,7 +589,7 @@ CONTINUE_PARSE:
     if (flags.test) {
         DirTest Dir_Test = mk_dir_test(test_test, test_cmakelists);
         const char* directory_test = append_to_path(config.path, "test");
-        MKDIR_OR_EXIT(directory_test);
+        MKDIR_OR_PANIC(&config, directory_test);
 
         WRITE_APPEND(directory_root, "CMakeLists.txt", "add_subdirectory(test)\n");
         WRITE(directory_test, "test.cpp", Dir_Test.test);
@@ -557,7 +606,7 @@ CONTINUE_PARSE:
         if (!flags.test) {
             /*Add Googletest as a dependency*/
             const char* directory_vendor = append_to_path(config.path, "vendor");
-            MKDIR_OR_EXIT(directory_vendor);
+            MKDIR_OR_PANIC(&config, directory_vendor);
 
             WRITE_APPEND(directory_root, "CMakeLists.txt", "add_subdirectory(vendor/googletest)\n");
 
@@ -570,7 +619,7 @@ CONTINUE_PARSE:
 
         DirBenchmark Dir_Benchmark = mk_dir_benchmark(benchmark_bench, benchmark_cmakelists);
         const char* directory_benchmark = append_to_path(config.path, "benchmark");
-        MKDIR_OR_EXIT(directory_benchmark);
+        MKDIR_OR_PANIC(&config, directory_benchmark);
 
         WRITE_APPEND(directory_root, "CMakeLists.txt", "add_subdirectory(benchmark)\n");
         WRITE(directory_benchmark, "bench.cpp", Dir_Benchmark.bench);
@@ -581,6 +630,8 @@ CONTINUE_PARSE:
 
         free(directory_benchmark);
     }
+
+    fprintf(stdout, "cg: Created %s\n", config.directory);
 
     wreck_config(&config);
     return 0;
