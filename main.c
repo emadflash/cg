@@ -160,13 +160,13 @@ DirBenchmark mk_dir_benchmark(const char* bench, const char* cmakelists) {
 typedef struct {
     char* name;
     char* path;
-    char* dir;
+    char* directory;
 } Config;
 
 void make_config(Config* config) {
     config->name = NULL;
     config->path = NULL;
-    config->dir = NULL;
+    config->directory = NULL;
 }
 
 void wreck_config(Config* config) {
@@ -184,21 +184,25 @@ void wreck_config(Config* config) {
 #define GIT_SUBMODULE_ADD "git submodule add"
 #define CG_GIT_INIT() CG_SYSTEM(GIT_INIT)
 
-void CG_SYSTEM(const char* x) {
-    if (system(x) < 0) {
-        ERROR_AND_EXIT("ERROR: executing %s", x);
+#define CG_SYSTEM(x)\
+    if (system(x) < 0) {\
+        ERROR_AND_EXIT("ERROR: executing %s", x);\
     }
-}
 
-static void CG_MKDIR_OR_EXIT(const char* X) {
-    if (mkdir(X, S_IRWXU) < 0) {
-        perror("ERROR: mkdir()");
-        exit(1);
+#define CG_MKDIR(X)\
+    if (mkdir(X, S_IRWXU) < 0) {\
+        ERROR("ERROR: mkdir(): %s: ", X);\
+        perror(NULL);\
+        exit(1);\
     }
-    chdir(X);
-    CG_SYSTEM(GIT_INIT);
-    chdir("..");
-}
+
+#define CG_MKDIR_W_GIT(X, Y)\
+    CG_MKDIR(Y);\
+    if (X) {\
+        chdir(X);\
+        CG_SYSTEM(GIT_INIT);\
+        chdir("..");\
+    }
 
 void CG_ADD_SUBMODULE(const char* dir, const char* repo) {
     size_t buffer_size = strlen(GIT_SUBMODULE_ADD) + strlen(repo) + 3;
@@ -212,19 +216,30 @@ void CG_ADD_SUBMODULE(const char* dir, const char* repo) {
 }
 /*GIT END*/
 
+/*Args*/
 typedef struct {
     bool init;
     bool new;
 } Args;
 
+
+/*Flags*/
+#define IS_ADD_SUPPLIED (flags.test || flags.benchmark)
+
 typedef struct {
     bool test;
     bool benchmark;
     bool make_random_dir;
+    bool initialize_git_repo;
 } Flags;
 
-/*Maybe unused for sure*/
-int is_dir_exists(const char* dir) {
+void mk_flags(Flags* flags) {
+    flags->initialize_git_repo = true;
+}
+
+
+/*Check if file exists*/
+int exists(const char* dir) {
     struct stat _stat;
     if (stat(&dir, &stat) == 0 && S_ISDIR(_stat.st_mode)) {
         return 0;
@@ -348,6 +363,7 @@ Options:\n\
            example: -add +test +bench\n\
     -rnd   create a random dir, default directory length is 3\n\
            can be changed using +[length]\n\
+    -dg    Donot initialize git repo. Will raise error in case of external modules required\n\
     -help  Prints this crappy message\n\
 ";
 
@@ -366,8 +382,10 @@ int main(int argc, char** argv) {
     Config config;
     make_config(&config);
 
-    Flags flags;
     Args args;
+
+    Flags flags;
+    mk_flags(&flags);
 
     char** args_begin = argv + 1;
     char** args_end = argv + argc;
@@ -460,6 +478,9 @@ CONTINUE_PARSE:
             cmd_initialize_new(&config, dir_name); /* try using it with -rnd new suicide */
             free(dir_name);
             args_begin++;
+        } else if (STRCMP(*args_begin, "-dg")) {
+            flags.initialize_git_repo = false;
+            args_begin++;
         } else if (STRCMP(*args_begin, "-help")) {
             Usage(stdout);
             exit(0);
@@ -481,10 +502,20 @@ CONTINUE_PARSE:
         config.name = get_curr_folder(config.path, strlen(config.path));
     }
 
-    config.dir = config.name;
+    config.directory = config.name;
 
-    (!args.init)
-        ? CG_MKDIR_OR_EXIT(config.dir) : CG_SYSTEM(GIT_INIT);
+    if (!flags.initialize_git_repo && IS_ADD_SUPPLIED) {
+        ERROR("Invaild: use of -dg with test and bench flags\n");
+        exit(1);
+    }
+
+    if (!args.init) {
+        CG_MKDIR_W_GIT(flags.initialize_git_repo, config.directory);
+    } else {
+        if (flags.initialize_git_repo) {
+            CG_SYSTEM(GIT_INIT);
+        }
+    }
 
     /* ---------------------------- */
     /* Creating directory and files */
