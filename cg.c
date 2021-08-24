@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
@@ -90,14 +92,47 @@ DirSource mk_dir_source(const char* main, const char* cmakelists) {
 
 
 /*TEST DIR*/
-const char* test_test = "#include <gtest/gtest.h>\n\
+const char* test_test_gtest = "#include <gtest/gtest.h>\n\
 \n\
 TEST(test, sample) {\n\
     EXPECT_EQ(true, true);\n\
 }\n\
 ";
 
-const char* test_cmakelists = "cmake_minimum_required(VERSION 3.10)\n\
+const char* test_test_libcheck = "#include <check.h>\n\
+\n\
+START_TEST(sample_test) {\n\
+    ck_assert_int_ne(1, -1);\n\
+}\n\
+END_TEST\n\
+\n\
+Suite* suite(void) {\n\
+    Suite* s;\n\
+    TCase* tc_core;\n\
+    s = suite_create(\"sample\");\n\
+    tc_core = tcase_create(\"test\");\n\
+\n\
+    tcase_add_test(tc_core, sample_test);\n\
+    return s;\n\
+}\n\
+\n\
+int main() {\n\
+    int no_failed = 0;\n\
+    Suite* s;\n\
+    SRunner* runner;\n\
+\n\
+    s = suite();\n\
+    runner = srunner_create(s);\n\
+\n\
+    srunner_run_all(runner, CK_NORMAL);\n\
+    no_failed = srunner_ntests_failed(runner);\n\
+    srunner_free(runner);\n\
+    return (no_failed == 0) ? 0 : 1;\n\
+}\n\
+";
+
+
+const char* test_cmakelists_gtest = "cmake_minimum_required(VERSION 3.10)\n\
 \n\
 project(test)\n\
 \n\
@@ -109,6 +144,21 @@ add_executable(${PROJECT_NAME}\n\
 target_link_libraries(${PROJECT_NAME}\n\
     gtest\n\
     gtest_main\n\
+)\n\
+";
+
+const char* test_cmakelists_libcheck = "cmake_minimum_required(VERSION 3.10)\n\
+\n\
+project(test)\n\
+\n\
+add_subdirectory(check)\n\
+add_executable(${PROJECT_NAME}\n\
+    test.c\n\
+)\n\
+\n\
+target_link_libraries(${PROJECT_NAME}\n\
+    check\n\
+    pthread\n\
 )\n\
 ";
 
@@ -161,6 +211,7 @@ DirBenchmark mk_dir_benchmark(const char* bench, const char* cmakelists) {
 /*REPOSITORYS*/
 #define REPOSITORY_GOOGLE_TEST "https://github.com/google/googletest"
 #define REPOSITORY_GOOGLE_BENCHMARK "https://github.com/google/benchmark.git"
+#define REPOSITORY_LIBCHECK_TEST "https://github.com/libcheck/check"
 
 /*#define GIT_STATUS "git status"*/
 #define GIT_INIT "git init"
@@ -217,7 +268,8 @@ typedef struct {
          benchmark,
          make_random_dir,
          initialize_git_repo,
-         sprinkle_w_numerics;
+         sprinkle_w_numerics,
+         add_libcheck;
 } Flags;
 
 void mk_flags(Flags* flags) {
@@ -262,14 +314,6 @@ LOOP:
     memcpy(folder, start, folder_size);
     folder[folder_size - 1] = '\0';
     return folder;
-}
-
-char* CG_DEEP_COPY(char* dest, size_t size) {
-    size_t _size = size + 1;
-    char* ret = (char*) malloc(_size* sizeof(char));
-    memcpy(ret, dest, _size);
-    ret[_size - 1] = '\0';
-    return ret;
 }
 
 /* TODO Make it variadic */
@@ -355,6 +399,8 @@ typedef struct {
     char* name;
     char* path;
     char* directory;
+
+    const char* test_repository;
 } Config;
 
 void make_config(Config* config) {
@@ -369,7 +415,8 @@ void wreck_config(Config* config) {
 }
 
 void mk_config_name_new(Config* config, char* curr) {
-    config->name = CG_DEEP_COPY(curr, strlen(curr));
+    config->name = strdup(curr);
+    if (!config->name) perror("strdup");
 }
 
 void mk_config_name_init(Config* config) {
@@ -404,6 +451,7 @@ Options:\n\
            can be changed using +[length]\n\
     -dg    Do not initialize git repo. Will raise error in case of external modules required\n\
     -nm    Add numerics to directory name at random positions something like salting\n\
+    -lc    Use libcheck for testing\n\
     -help  Prints this shitty message\n\
 ";
 
@@ -525,6 +573,9 @@ CONTINUE_PARSE:
         } else if (STRCMP(*args_begin, "-nm")) {
             flags.sprinkle_w_numerics = true;
             args_begin++;
+        } else if (STRCMP(*args_begin, "-lc")) {
+            flags.add_libcheck = true;
+            args_begin++;
         } else if (STRCMP(*args_begin, "-help")) {
             Usage(stdout);
             exit(0);
@@ -548,6 +599,13 @@ CONTINUE_PARSE:
     mk_path(&config, args);
 
     config.directory = config.name;
+
+    /* Is libcheck */
+    if (flags.add_libcheck) {
+        config.test_repository = REPOSITORY_LIBCHECK_TEST;
+    } else {
+        config.test_repository = REPOSITORY_GOOGLE_TEST;
+    }
 
     if (!flags.initialize_git_repo && IS_ADD_SUPPLIED) {
         ERROR("ERROR: Shit use of -dg with test and bench flags\n");
@@ -587,16 +645,23 @@ CONTINUE_PARSE:
 
     /* Test directory */
     if (flags.test) {
-        DirTest Dir_Test = mk_dir_test(test_test, test_cmakelists);
         const char* directory_test = append_to_path(config.path, "test");
         MKDIR_OR_PANIC(&config, directory_test);
 
         WRITE_APPEND(directory_root, "CMakeLists.txt", "add_subdirectory(test)\n");
-        WRITE(directory_test, "test.cpp", Dir_Test.test);
-        WRITE(directory_test, "CMakeLists.txt", Dir_Test.cmakelists);
+
+        if (flags.add_libcheck) {
+            DirTest Dir_Test = mk_dir_test(test_test_libcheck, test_cmakelists_libcheck);
+            WRITE(directory_test, "test.c", Dir_Test.test);
+            WRITE(directory_test, "CMakeLists.txt", Dir_Test.cmakelists);
+        } else {
+            DirTest Dir_Test = mk_dir_test(test_test_gtest, test_cmakelists_gtest);
+            WRITE(directory_test, "test.cpp", Dir_Test.test);
+            WRITE(directory_test, "CMakeLists.txt", Dir_Test.cmakelists);
+        }
 
         /*Add googletest*/
-        CG_ADD_SUBMODULE(directory_test, REPOSITORY_GOOGLE_TEST);
+        CG_ADD_SUBMODULE(directory_test, config.test_repository);
 
         free(directory_test);
     }
@@ -608,10 +673,14 @@ CONTINUE_PARSE:
             const char* directory_vendor = append_to_path(config.path, "vendor");
             MKDIR_OR_PANIC(&config, directory_vendor);
 
-            WRITE_APPEND(directory_root, "CMakeLists.txt", "add_subdirectory(vendor/googletest)\n");
+            if (flags.add_libcheck) {
+                WRITE_APPEND(directory_root, "CMakeLists.txt", "add_subdirectory(vendor/check)\n");
+            } else {
+                WRITE_APPEND(directory_root, "CMakeLists.txt", "add_subdirectory(vendor/googletest)\n");
+            }
 
             /*Add googletest*/
-            CG_ADD_SUBMODULE(directory_vendor, REPOSITORY_GOOGLE_TEST);
+            CG_ADD_SUBMODULE(directory_vendor, config.test_repository);
 
             free(directory_vendor);
             /*END*/
