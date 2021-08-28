@@ -1,3 +1,4 @@
+/*cg: Creates a temporary (shitty) project*/
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
@@ -468,6 +469,7 @@ void mk_path(Config* config, Args args) {
 static const char* help_message = "\
 Usage: %s\n\
     Creates a temporary (shitty) project\n\
+\n\
 Args:\n\
     new    Creates new project dir\n\
     init   Iniitializes new project in current dir\n\
