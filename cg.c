@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
@@ -63,7 +64,7 @@ DirRoot mk_dir_root(const char* cmakelists, const char* gitignore) {
 const char* source_main = "#include<stdio.h>\n\
 \n\
 int main(int argc, char** argv) {\n\
-    printf(\"%s\", \"hello world\");\n\
+    printf(\"hello world\");\n\
     return 0;\n\
 }\n";
 
@@ -269,7 +270,8 @@ typedef struct {
          make_random_dir,
          initialize_git_repo,
          sprinkle_w_numerics,
-         add_libcheck;
+         add_libcheck,
+         make_c_files;
 } Flags;
 
 void mk_flags(Flags* flags) {
@@ -341,16 +343,42 @@ bool is_vaild_string_of_ints(char* str, size_t len) {
     return true;
 }
 
-#define WRITE(X, Y, Z) CG_WRITE("w", X, Y, Z)
-#define WRITE_APPEND(X, Y, Z) CG_WRITE("a", X, Y, Z)
-void CG_WRITE(const char* mode, const char* directory_path, const char* file_path, char* thing) {
+/*cg_file_type*/
+typedef enum {
+    cg_file_write,
+    cg_file_append,
+} cg_file_type;
+
+const char* cg_file_type_to_string(cg_file_type type) {
+#define _FILE_TYPE_TO_STRING(X, Y)\
+    case X:\
+        return Y
+    switch (type) {
+        _FILE_TYPE_TO_STRING(cg_file_write, "w");
+        _FILE_TYPE_TO_STRING(cg_file_append, "a");
+    }
+    return "???";
+}
+
+
+#define WRITE(X, Y, Z) CG_WRITE(cg_file_write, X, Y, Z)
+#define WRITE_APPEND(X, Y, Z) CG_WRITE(cg_file_append, X, Y, Z)
+void CG_WRITE(cg_file_type type, const char* directory_path, const char* file_path, char* content, ...) {
     char* _file = append_to_path(directory_path, file_path);
+
+    const char* mode = cg_file_type_to_string(type);
     FILE* fp = fopen(_file, mode);
     if (fp == NULL) {
         ERROR("ERROR: Writing to %s\n", _file);
         exit(1);
     }
-    fprintf(fp, "%s", thing);
+
+    va_list args;
+
+    va_start(args, content);
+    vfprintf(fp, content, args);
+    va_end(args);
+
     free(_file);
     fclose(fp);
 }
@@ -452,6 +480,7 @@ Options:\n\
     -dg    Do not initialize git repo. Will raise error in case of external modules required\n\
     -nm    Add numerics to directory name at random positions something like salting\n\
     -lc    Use libcheck for testing\n\
+    -cc    Generates c files\n\
     -help  Prints this shitty message\n\
 ";
 
@@ -576,6 +605,9 @@ CONTINUE_PARSE:
         } else if (STRCMP(*args_begin, "-lc")) {
             flags.add_libcheck = true;
             args_begin++;
+        } else if (STRCMP(*args_begin, "-cc")) {
+            flags.make_c_files = true;
+            args_begin++;
         } else if (STRCMP(*args_begin, "-help")) {
             Usage(stdout);
             exit(0);
@@ -623,6 +655,25 @@ CONTINUE_PARSE:
     /* ---------------------------- */
     /* Creating directory and files */
     /* ---------------------------- */
+    /*C files, Will be ignoring all other flags*/
+    if (flags.make_c_files) {
+        const char* c_makefile = "CC=gcc\n\
+CFLAGS=-Wall -g -pedantic -fsanitize=address -std=c99\n\
+EXEC=%s\n\
+\n\
+EXEC: %s.c\n\
+		$(CC) $(CFLAGS) %s.c -o $(EXEC)";
+
+        size_t main_name_size = strlen(config.name) + 2 + 1;
+        char main_name[main_name_size];
+        snprintf(main_name, main_name_size, "%s.c", config.name);
+
+        CG_WRITE(cg_file_write, config.path, main_name, "/*%s*/\n", config.name);
+        CG_WRITE(cg_file_append, config.path, main_name, source_main);
+        CG_WRITE(cg_file_write, config.path, "Makefile", c_makefile, config.name, config.name, config.name);
+        goto DONE;
+    }
+
     /* Root directory */
     DirRoot Dir_Root = mk_dir_root(root_cmakelists, root_gitignore);
     char* directory_root = config.path;
@@ -700,8 +751,10 @@ CONTINUE_PARSE:
         free(directory_benchmark);
     }
 
-    fprintf(stdout, "cg: Created %s\n", config.directory);
+    goto DONE;
 
+DONE:
+    fprintf(stdout, "cg: Created %s\n", config.directory);
     wreck_config(&config);
     return 0;
 }
