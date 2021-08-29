@@ -289,7 +289,7 @@ int exists(const char* dir) {
     return -1;
 }
 
-const char* get_curr_path(void) {
+__attribute__ ((const)) const char* get_curr_path(void) {
     char* curr_path = getenv("PWD");
     if (curr_path == NULL) {
         fprintf(stdout, "This thing uses getenv which requires PWD env\n");
@@ -298,7 +298,7 @@ const char* get_curr_path(void) {
     return curr_path;
 }
 
-char* get_curr_folder(char* path, size_t path_size) {
+__attribute__ ((pure, malloc)) char* get_curr_folder(char* path, size_t path_size) {
     char* start = NULL;
     char* end = path + path_size;
 
@@ -326,7 +326,7 @@ void append_to_path_a_modify(char* path, size_t len, char* file) {
     snprintf(path + len, "/%s\0", file);
 }
 
-char* append_to_path(const char* path, char* file) {
+__attribute__((malloc)) char* append_to_path(const char* path, char* file) {
     size_t _path_size = strlen(path) + strlen(file) + 2;
     char* _path = (char*) malloc(_path_size* sizeof(char));
     snprintf(_path, _path_size, "%s/%s\0", path, file);
@@ -350,7 +350,7 @@ typedef enum {
     cg_file_append,
 } cg_file_type;
 
-const char* cg_file_type_to_string(cg_file_type type) {
+const char* __attribute__((always_inline)) cg_file_type_to_string(cg_file_type type) {
 #define _FILE_TYPE_TO_STRING(X, Y)\
     case X:\
         return Y
@@ -398,7 +398,7 @@ char get_random_char(const char* chars, size_t len) {
     return chars[n];
 }
 
-char* get_random_dir_name(const size_t len) {
+__attribute__((malloc, pure)) char* get_random_dir_name(const size_t len) {
     int i = 0;
     char* dir_name = (char*) malloc((len + 1)* sizeof(char));
     for(; i < len; ++i) {
@@ -467,23 +467,28 @@ void mk_path(Config* config, Args args) {
 /*CONFIG END*/
 
 static const char* help_message = "\
-Usage: %s\n\
-    Creates a temporary (shitty) project\n\
+Usage: %s [ARGS...] [OPTIONS...]\n\
+\n\
+Description: Creates a temporary (shitty) project\n\
 \n\
 Args:\n\
     new    Creates new project dir\n\
     init   Iniitializes new project in current dir\n\
 \n\
 Options:\n\
-    -add   Generate test, benchmark dirs\n\
-           example: -add +test +bench\n\
-    -rd    Create a random directory, default length is 3\n\
-           can be changed using +[length]\n\
-    -dg    Do not initialize git repo. Will raise error in case of external modules required\n\
-    -nm    Add numerics to directory name at random positions something like salting\n\
-    -lc    Use libcheck for testing\n\
-    -cc    Generates c files\n\
-    -help  Prints this shitty message\n\
+    -a, --add [test|bench]  generate test, benchmark dirs [test, bench]\n\
+\n\
+    -r, --random-dir [LEN]   create a random directory, default length is 3\n\
+\n\
+    -d, --no-git            do not initialize git repo. Will raise error in case of external modules required\n\
+\n\
+    -n, --numerics          Add numerics to directory name at random positions something like salting\n\
+\n\
+    -ac, --add-libcheck     Use libcheck for testing\n\
+\n\
+    -cc, --c-files          Generates c files\n\
+\n\
+    -h, --help              Prints this shitty message\n\
 ";
 
 static void Usage(FILE* where) {
@@ -518,7 +523,7 @@ int main(int argc, char** argv) {
                 exit(1);
             } else {
                 if (flags.make_random_dir) {
-                    ERROR("ERROR: Shit use of -rd with new\n");
+                    ERROR("ERROR: Shit use of --random-dir with new\n");
                     CG_PANIC(&config);
                 }
                 mk_config_name_new(&config, *curr);
@@ -529,7 +534,7 @@ int main(int argc, char** argv) {
             mk_config_name_init(&config);
             args.init = true;
             args_begin += 1;
-        } else if (STRCMP(*args_begin, "-add")) {
+        } else if (STRCMP(*args_begin, "-a") || STRCMP(*args_begin, "--add")) {
             char** curr = args_begin + 1;
             if (curr == args_end) {
                 ERROR("ERROR: missing +test +benchmark\n");
@@ -566,10 +571,10 @@ int main(int argc, char** argv) {
 CONTINUE_PARSE:
                 args_begin = list_args_begin;
             }
-        } else if (STRCMP(*args_begin, "-rd")) {
+        } else if (STRCMP(*args_begin, "-r") || STRCMP(*args_begin, "--random-dir")) {
             /*Raise an error if new is supplied as well*/
             if (args.new) {
-                ERROR("ERROR: Shit use of new with -rd\n");
+                ERROR("ERROR: Shit use of new with --random-dir\n");
                 CG_PANIC(&config);
             }
             int dir_name_length = 3;
@@ -598,19 +603,19 @@ CONTINUE_PARSE:
             mk_config_name_new(&config, dir_name); /* try using it with -rd new suicide */
             free(dir_name);
             args_begin++;
-        } else if (STRCMP(*args_begin, "-dg")) {
+        } else if (STRCMP(*args_begin, "-d") || STRCMP(*args_begin, "--no-git")) {
             flags.initialize_git_repo = false;
             args_begin++;
-        } else if (STRCMP(*args_begin, "-nm")) {
+        } else if (STRCMP(*args_begin, "-n") || STRCMP(*args_begin, "--numerics")) {
             flags.sprinkle_w_numerics = true;
             args_begin++;
-        } else if (STRCMP(*args_begin, "-lc")) {
+        } else if (STRCMP(*args_begin, "-lc") || STRCMP(*args_begin, "-add-libcheck")) {
             flags.add_libcheck = true;
             args_begin++;
-        } else if (STRCMP(*args_begin, "-cc")) {
+        } else if (STRCMP(*args_begin, "-cc") || STRCMP(*args_begin, "--c-files")) {
             flags.make_c_files = true;
             args_begin++;
-        } else if (STRCMP(*args_begin, "-help")) {
+        } else if (STRCMP(*args_begin, "-h") || STRCMP(*args_begin, "--help")) {
             Usage(stdout);
             exit(0);
         } else {
@@ -625,7 +630,6 @@ CONTINUE_PARSE:
         exit(1);
     }
 
-    /*TODO(maflash) try ../cg/cg -nm new suicide*/
     if (flags.sprinkle_w_numerics) {
         sprinkle_path_w_numerics(config.name, strlen(config.name));
     }
@@ -663,16 +667,12 @@ CONTINUE_PARSE:
 CFLAGS=-Wall -g -pedantic -fsanitize=address -std=c99\n\
 EXEC=%s\n\
 \n\
-EXEC: %s.c\n\
-		$(CC) $(CFLAGS) %s.c -o $(EXEC)";
+EXEC: main.c\n\
+		$(CC) $(CFLAGS) main.c -o $(EXEC)";
 
-        size_t main_name_size = strlen(config.name) + 2 + 1;
-        char main_name[main_name_size];
-        snprintf(main_name, main_name_size, "%s.c", config.name);
-
-        CG_WRITE(cg_file_write, config.path, main_name, "/*%s*/\n", config.name);
-        CG_WRITE(cg_file_append, config.path, main_name, source_main);
-        CG_WRITE(cg_file_write, config.path, "Makefile", c_makefile, config.name, config.name, config.name);
+        CG_WRITE(cg_file_write, config.path, "main.c", "/*%s*/\n", config.name);
+        CG_WRITE(cg_file_append, config.path, "main.c", source_main);
+        CG_WRITE(cg_file_write, config.path, "Makefile", c_makefile, config.name);
         goto DONE;
     }
 
