@@ -38,11 +38,11 @@
     }\
 
 /* -------------------------------------------------------------------------------------------- */
-const char* root_gitignore = "\
+static const char* root_gitignore = "\
 build/\n\
 ";
 
-const char* root_cmakelists = "\
+static const char* root_cmakelists = "\
 cmake_minimum_required (VERSION 3.10)\n\
 \n\
 set(THIS \"Project_Name\")\n\
@@ -58,7 +58,7 @@ typedef struct {
     const char* gitignore;
 } DirRoot;
 
-DirRoot mk_dir_root(const char* cmakelists, const char* gitignore) {
+static DirRoot mk_dir_root(const char* cmakelists, const char* gitignore) {
     return (DirRoot) {
         .cmakelists = cmakelists,
         .gitignore = gitignore,
@@ -66,14 +66,14 @@ DirRoot mk_dir_root(const char* cmakelists, const char* gitignore) {
 }
 
 /* -------------------------------------------------------------------------------------------- */
-const char* source_main = "#include<stdio.h>\n\
+static const char* source_main = "#include<stdio.h>\n\
 \n\
 int main(int argc, char** argv) {\n\
     printf(\"hello world\");\n\
     return 0;\n\
 }\n";
 
-const char* source_cmakelists = "\
+static const char* source_cmakelists = "\
 cmake_minimum_required(VERSION 3.10)\n\
 \n\
 set(THIS \"Project_Binary\")\n\
@@ -88,7 +88,7 @@ typedef struct {
     char* cmakelists;
 } DirSource;
 
-DirSource mk_dir_source(const char* main, const char* cmakelists) {
+static DirSource mk_dir_source(const char* main, const char* cmakelists) {
     return (DirSource) {
         .main = main,
         .cmakelists = cmakelists,
@@ -96,14 +96,14 @@ DirSource mk_dir_source(const char* main, const char* cmakelists) {
 }
 
 /* -------------------------------------------------------------------------------------------- */
-const char* test_test_gtest = "#include <gtest/gtest.h>\n\
+static const char* test_test_gtest = "#include <gtest/gtest.h>\n\
 \n\
 TEST(test, sample) {\n\
     EXPECT_EQ(true, true);\n\
 }\n\
 ";
 
-const char* test_test_libcheck = "#include <check.h>\n\
+static const char* test_test_libcheck = "#include <check.h>\n\
 \n\
 START_TEST(sample_test) {\n\
     ck_assert_int_ne(1, -1);\n\
@@ -135,7 +135,7 @@ int main() {\n\
 }\n\
 ";
 
-const char* test_cmakelists_gtest = "cmake_minimum_required(VERSION 3.10)\n\
+static const char* test_cmakelists_gtest = "cmake_minimum_required(VERSION 3.10)\n\
 \n\
 project(test)\n\
 \n\
@@ -150,7 +150,7 @@ target_link_libraries(${PROJECT_NAME}\n\
 )\n\
 ";
 
-const char* test_cmakelists_libcheck = "cmake_minimum_required(VERSION 3.10)\n\
+static const char* test_cmakelists_libcheck = "cmake_minimum_required(VERSION 3.10)\n\
 \n\
 project(test)\n\
 \n\
@@ -170,7 +170,7 @@ typedef struct {
     char* cmakelists;
 } DirTest;
 
-DirTest mk_dir_test(const char* test, const char* cmakelists) {
+static DirTest mk_dir_test(const char* test, const char* cmakelists) {
     return (DirTest) {
         .test = test,
         .cmakelists = cmakelists,
@@ -178,7 +178,7 @@ DirTest mk_dir_test(const char* test, const char* cmakelists) {
 }
 
 /* -------------------------------------------------------------------------------------------- */
-const char* benchmark_cmakelists = "cmake_minimum_required (VERSION 3.10)\n\
+static const char* benchmark_cmakelists = "cmake_minimum_required (VERSION 3.10)\n\
 \n\
 add_subdirectory(benchmark)\n\
 \n\
@@ -191,7 +191,7 @@ target_link_libraries(bench\n\
 )\n\
 ";
 
-const char* benchmark_bench = "#include <benchmark/benchmark.h>\n\
+static const char* benchmark_bench = "#include <benchmark/benchmark.h>\n\
 \n\
 BENCHMARK_MAIN();\n\
 ";
@@ -201,7 +201,7 @@ typedef struct {
     const char* cmakelists;
 } DirBenchmark;
 
-DirBenchmark mk_dir_benchmark(const char* bench, const char* cmakelists) {
+static DirBenchmark mk_dir_benchmark(const char* bench, const char* cmakelists) {
     return (DirBenchmark) {
         .bench = bench,
         .cmakelists = cmakelists,
@@ -209,7 +209,7 @@ DirBenchmark mk_dir_benchmark(const char* bench, const char* cmakelists) {
 }
 
 /* -------------------------------------------------------------------------------------------- */
-const char* c_makefile = "CC=gcc\n\
+static const char* c_makefile = "CC=gcc\n\
 CFLAGS=-Wall -g -pedantic -fsanitize=address -std=c99\n\
 EXEC=%s\n\
 \n\
@@ -249,7 +249,7 @@ EXEC: main.c\n\
         CG_SWITCH_DIRECTORY_A_EXEC(X, GIT_INIT);\
     }
 
-void CG_ADD_SUBMODULE(const char* dir, const char* repo) {
+static void CG_ADD_SUBMODULE(const char* dir, const char* repo) {
     size_t buffer_size = strlen(GIT_SUBMODULE_ADD) + strlen(repo) + 3;
     char buffer[buffer_size];
     snprintf(buffer, buffer_size, "%s %s\0", GIT_SUBMODULE_ADD, repo);
@@ -263,7 +263,6 @@ typedef struct {
     bool new;
 } Args;
 
-
 #define IS_ADD_SUPPLIED (flags.test || flags.benchmark)
 
 typedef struct {
@@ -276,12 +275,12 @@ typedef struct {
          make_c_files;
 } Flags;
 
-void mk_flags(Flags* flags) {
+static void mk_flags(Flags* flags) {
     flags->initialize_git_repo = true;
 }
 
 /* -------------------------------------------------------------------------------------------- */
-int exists(const char* dir) {
+static int exists(const char* dir) {
     struct stat _stat;
     if (stat(&dir, &stat) == 0 && S_ISDIR(_stat.st_mode)) {
         return 0;
@@ -289,7 +288,7 @@ int exists(const char* dir) {
     return -1;
 }
 
-__attribute__ ((const)) const char* get_curr_path(void) {
+__attribute__ ((const)) static const char* get_curr_path(void) {
     char* curr_path = getenv("PWD");
     if (curr_path == NULL) {
         fprintf(stdout, "This thing uses getenv which requires PWD env\n");
@@ -298,7 +297,7 @@ __attribute__ ((const)) const char* get_curr_path(void) {
     return curr_path;
 }
 
-__attribute__ ((pure, malloc)) char* get_curr_folder(char* path, size_t path_size) {
+__attribute__ ((pure, malloc)) static char* get_curr_folder(char* path, size_t path_size) {
     char* start = NULL;
     char* end = path + path_size;
 
@@ -319,7 +318,7 @@ LOOP:
     return folder;
 }
 
-__attribute__((malloc)) char* v_append_path(const char* path, const char* files, ...) {
+__attribute__((malloc)) static char* v_append_path(const char* path, const char* files, ...) {
     va_list ap;
     va_start(ap, files);
 
@@ -347,11 +346,11 @@ __attribute__((malloc)) char* v_append_path(const char* path, const char* files,
     return _path;
 }
 
-__attribute__((malloc, always_inline)) char* append_path(const char* path, char* file) {
+__attribute__((malloc, always_inline)) static char* append_path(const char* path, char* file) {
     return v_append_path(path, file, NULL);
 }
 
-bool is_vaild_string_of_ints(char* str, size_t len) {
+static bool is_vaild_string_of_ints(char* str, size_t len) {
     int i = 0;
     for(; i < len; ++i) {
         if (str[i] >= 48 && str[i] <= 57) {
@@ -368,7 +367,7 @@ typedef enum {
     cg_file_append,
 } cg_file_type;
 
-const char* __attribute__((always_inline)) cg_file_type_to_string(cg_file_type type) {
+static const char* __attribute__((always_inline)) cg_file_type_to_string(cg_file_type type) {
 #define _FILE_TYPE_TO_STRING(X, Y)\
     case X:\
         return Y
@@ -381,7 +380,7 @@ const char* __attribute__((always_inline)) cg_file_type_to_string(cg_file_type t
 
 #define WRITE(X, Y, Z) CG_WRITE(cg_file_write, X, Y, Z)
 #define WRITE_APPEND(X, Y, Z) CG_WRITE(cg_file_append, X, Y, Z)
-void CG_WRITE(cg_file_type type, const char* directory_path, const char* file_path, char* content, ...) {
+static void CG_WRITE(cg_file_type type, const char* directory_path, const char* file_path, char* content, ...) {
     char* _file = append_path(directory_path, file_path);
 
     const char* mode = cg_file_type_to_string(type);
@@ -409,15 +408,16 @@ int get_random_idx(const size_t range) {
     return rand() % range;
 }
 
-char get_random_char(const char* chars, size_t len) {
+static char get_random_char(const char* chars, size_t len) {
     size_t n = get_random_idx(len);
     assert((n >= 0 && n < len) && "Random number generated is overflowing the chars buffer");
     return chars[n];
 }
 
 __attribute__((malloc, pure)) char* get_random_dir_name(const size_t len) {
-    int i = 0;
     char* dir_name = (char*) malloc((len + 1)* sizeof(char));
+
+    int i = 0;
     for(; i < len; ++i) {
         dir_name[i] = get_random_char(alphas, strlen(alphas));
     }
@@ -425,7 +425,7 @@ __attribute__((malloc, pure)) char* get_random_dir_name(const size_t len) {
     return dir_name;
 }
 
-void sprinkle_path_w_numerics(char* path, size_t len) {
+static void sprinkle_path_w_numerics(char* path, size_t len) {
     int offset = 1;
     int limit = len / 3;
 
@@ -447,27 +447,27 @@ typedef struct {
     const char* test_repository;
 } Config;
 
-void make_config(Config* config) {
+static void make_config(Config* config) {
     config->name = NULL;
     config->path = NULL;
     config->directory = NULL;
 }
 
-void wreck_config(Config* config) {
+static void wreck_config(Config* config) {
     free(config->name);
     free(config->path);
 }
 
-void mk_config_name_new(Config* config, char* curr) {
+static void mk_config_name_new(Config* config, char* curr) {
     config->name = strdup(curr);
     if (!config->name) perror("strdup");
 }
 
-void mk_config_name_init(Config* config) {
+static void mk_config_name_init(Config* config) {
     config->name = get_curr_folder(config->path, strlen(config->path));
 }
 
-void mk_path(Config* config, Args args) {
+static void mk_path(Config* config, Args args) {
     char* current_path = get_curr_path();
 
     if (args.init) {
